@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -107,16 +108,28 @@ func reconcileDelete(clusterScope *scope.ClusterScope) (reconcile.Result, error)
 	elbsvc := elb.NewService(clusterScope)
 	awsCluster := clusterScope.AWSCluster
 
+	var errs []error
+
 	if err := elbsvc.DeleteLoadbalancers(); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "error deleting load balancer for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name)
+		errs = append(errs, errors.Wrapf(err, "error deleting load balancers for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name))
 	}
 
 	if err := ec2svc.DeleteBastion(); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "error deleting bastion for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name)
+		errs = append(errs, errors.Wrapf(err, "error deleting bastion for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name))
 	}
 
 	if err := ec2svc.DeleteNetwork(); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "error deleting network for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name)
+		errs = append(errs, errors.Wrapf(err, "error deleting network for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name))
+	}
+
+	if len(errs) > 0 {
+		var combinedErrMsg string
+		for _, err := range errs {
+			combinedErrMsg += fmt.Sprintf("%s;", err.Error())
+		}
+		combinedErrMsg = combinedErrMsg[:len(combinedErrMsg)-1]
+
+		return reconcile.Result{}, fmt.Errorf("error(s) deleting cluster components: %s", combinedErrMsg)
 	}
 
 	// Cluster is deleted so remove the finalizer.
